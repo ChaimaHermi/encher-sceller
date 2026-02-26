@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 
 class ImageModel(BaseModel):
@@ -18,7 +18,7 @@ class BlockchainModel(BaseModel):
 class ListingCreate(BaseModel):
     listing_id: str
     seller_id: str
-    image: ImageModel
+    images: List[ImageModel]
     status: str = "UPLOADED"
     pipeline_phase: int = 1
     created_at: datetime
@@ -36,7 +36,7 @@ class ListingCreate(BaseModel):
 class ListingResponse(BaseModel):
     listing_id: str
     seller_id: str
-    image: ImageModel
+    images: List[ImageModel]
     status: str
     pipeline_phase: int
     created_at: datetime
@@ -57,7 +57,7 @@ class ListingResponse(BaseModel):
 class ListingBuyerView(BaseModel):
     """Vue limitée pour acheteur : pas les offres, pas le prix de réserve."""
     listing_id: str
-    image: ImageModel
+    images: List[ImageModel]
     title: Optional[str] = None
     starting_price: Optional[float] = None
     participants_count: int = 0
