@@ -1,0 +1,7 @@
+groq
+python-dotenv
+pyyaml
+aiohttp
+beautifulsoup4
+fake-useragent
+pydantic
