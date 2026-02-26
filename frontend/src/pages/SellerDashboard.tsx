@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getListings } from '../api/client';
 import { PipelineStepper } from '../components/PipelineStepper';
+import { getFirstImage } from '../utils/listing';
+import { API_BASE } from '../config';
 
 interface Listing {
   listing_id: string;
-  image: { filename: string; original_name: string };
+  images?: { filename: string; original_name: string }[];
+  image?: { filename: string; original_name: string };
   title?: string;
   starting_price?: number;
   status: string;
@@ -50,10 +53,12 @@ export function SellerDashboard() {
             <Link to="/seller/upload" className="cta">Déposer un produit</Link>
           </div>
         ) : (
-          listings.map((l) => (
+          listings.map((l) => {
+            const img = getFirstImage(l);
+            return (
             <div key={l.listing_id} className="seller-card">
               <div className="seller-card-image">
-                <img src={`/uploads/${l.image.filename}`} alt={l.image.original_name} />
+                {img ? <img src={`${API_BASE}/uploads/${img.filename}`} alt={img.original_name} /> : <div className="card-no-image">—</div>}
               </div>
               <div className="seller-card-body">
                 <h3>{l.title || 'Sans titre'}</h3>
@@ -62,7 +67,8 @@ export function SellerDashboard() {
                 <Link to={`/listing/${l.listing_id}`} className="btn-link">Voir / Continuer</Link>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </section>
