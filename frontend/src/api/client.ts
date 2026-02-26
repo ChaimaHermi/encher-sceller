@@ -1,12 +1,13 @@
 import { authFetch } from '../context/AuthContext';
+import { API_BASE } from '../config';
 
-export async function uploadImage(file: File) {
+export async function uploadImages(files: File[]) {
   const formData = new FormData();
-  formData.append('file', file);
+  files.forEach((f) => formData.append('files', f));
   const token = localStorage.getItem('encher_token');
   const headers: HeadersInit = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch('/api/upload', {
+  const res = await fetch(`${API_BASE}/api/upload`, {
     method: 'POST',
     headers,
     body: formData,
