@@ -3,11 +3,14 @@ import { useParams, Link } from 'react-router-dom';
 import { getListing, runPipelineStep, placeBid } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { PipelineStepper } from '../components/PipelineStepper';
+import { getListingImages } from '../utils/listing';
+import { API_BASE } from '../config';
 
 interface Listing {
   listing_id: string;
   seller_id?: string;
-  image: { filename: string; original_name: string };
+  images?: { filename: string; original_name: string }[];
+  image?: { filename: string; original_name: string };
   title?: string;
   starting_price?: number;
   participants_count?: number;
@@ -101,7 +104,7 @@ export function ListingDetail() {
   if (error && !listing) return <p className="error">Erreur : {error}</p>;
   if (!listing) return null;
 
-  const imageUrl = `/uploads/${listing.image.filename}`;
+  const images = getListingImages(listing);
   const canAdvance = isSeller && listing.pipeline_phase != null && listing.pipeline_phase < 5 && NEXT_STEP[listing.pipeline_phase];
   const isAuctionActive = listing.status === 'AUCTION_ACTIVE';
 
@@ -119,8 +122,20 @@ export function ListingDetail() {
       )}
 
       <div className="listing-content">
-        <div className="listing-image">
-          <img src={imageUrl} alt={listing.image.original_name} />
+        <div className="listing-images">
+          {images.length > 0 ? (
+            images.length === 1 ? (
+              <img src={`${API_BASE}/uploads/${images[0].filename}`} alt={images[0].original_name} />
+            ) : (
+              <div className="image-gallery">
+                {images.map((img, i) => (
+                  <img key={i} src={`${API_BASE}/uploads/${img.filename}`} alt={img.original_name} />
+                ))}
+              </div>
+            )
+          ) : (
+            <div className="card-no-image">Pas d'image</div>
+          )}
         </div>
         <div className="listing-info">
           <p><strong>Statut :</strong> {listing.status}</p>
