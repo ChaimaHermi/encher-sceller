@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getListings } from '../api/client';
+import { getFirstImage } from '../utils/listing';
+import { API_BASE } from '../config';
 
 interface Listing {
   listing_id: string;
-  image: { filename: string; original_name: string };
+  images?: { filename: string; original_name: string }[];
+  image?: { filename: string; original_name: string };
   title?: string;
   starting_price?: number;
   participants_count: number;
@@ -36,10 +39,12 @@ export function BuyerCatalog() {
         {listings.length === 0 ? (
           <p className="empty">Aucune enchère pour le moment.</p>
         ) : (
-          listings.map((l) => (
+          listings.map((l) => {
+            const img = getFirstImage(l);
+            return (
             <Link key={l.listing_id} to={`/listing/${l.listing_id}`} className="listing-card">
               <div className="card-image">
-                <img src={`/uploads/${l.image.filename}`} alt={l.image.original_name} />
+                {img ? <img src={`${API_BASE}/uploads/${img.filename}`} alt={img.original_name} /> : <div className="card-no-image">Pas d'image</div>}
               </div>
               <div className="card-body">
                 <h3>{l.title || 'Sans titre'}</h3>
@@ -52,7 +57,8 @@ export function BuyerCatalog() {
                 )}
               </div>
             </Link>
-          ))
+            );
+          })
         )}
       </div>
     </section>

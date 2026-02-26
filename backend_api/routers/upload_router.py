@@ -18,59 +18,66 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 # --------------------------------------------------
-# 📌 POST - Upload Image
+# 📌 POST - Upload Images (1 ou plusieurs)
 # --------------------------------------------------
 @router.post(
     "/upload",
-    summary="Upload product image and create draft listing (vendeur)"
+    summary="Upload une ou plusieurs images produit (vendeur)"
 )
-async def upload_image(
-    file: UploadFile = File(...),
+async def upload_images(
+    files: list[UploadFile] = File(...),
     user=Depends(require_seller),
 ):
-
-    # 🔎 Validation type fichier
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+    if not files:
+        raise HTTPException(status_code=400, detail="Au moins une image requise")
 
     listing_id = str(uuid.uuid4())
+    images_data = []
+    saved_paths = []
 
-    file_extension = file.filename.split(".")[-1].lower()
-    new_filename = f"{listing_id}.{file_extension}"
-    file_path = os.path.join(UPLOAD_FOLDER, new_filename)
+    for i, file in enumerate(files):
+        if not file.content_type or not file.content_type.startswith("image/"):
+            for p in saved_paths:
+                if os.path.exists(p):
+                    os.remove(p)
+            raise HTTPException(status_code=400, detail=f"Fichier invalide : {file.filename} doit être une image")
 
-    # 💾 Sauvegarde locale
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to save file")
+        ext = file.filename.split(".")[-1].lower() if "." in file.filename else "jpg"
+        new_filename = f"{listing_id}-{i}.{ext}"
+        file_path = os.path.join(UPLOAD_FOLDER, new_filename)
 
-    # 🧠 Construction document via service
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        except Exception:
+            for p in saved_paths:
+                if os.path.exists(p):
+                    os.remove(p)
+            raise HTTPException(status_code=500, detail="Échec sauvegarde fichier")
+
+        saved_paths.append(file_path)
+        images_data.append({
+            "filename": new_filename,
+            "original_name": file.filename,
+            "local_path": file_path,
+            "mime_type": file.content_type,
+        })
+
     document = build_listing_document(
         listing_id=listing_id,
-        filename=new_filename,
-        original_name=file.filename,
-        local_path=file_path,
-        mime_type=file.content_type,
+        images_data=images_data,
         seller_id=user["user_id"],
     )
 
-    # 📡 Insertion Mongo
-    collection = get_listings_collection()
-
     try:
-        await collection.insert_one(document)
+        await get_listings_collection().insert_one(document)
     except Exception:
-        # rollback fichier si DB échoue
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise HTTPException(status_code=500, detail="Database insertion failed")
+        for p in saved_paths:
+            if os.path.exists(p):
+                os.remove(p)
+        raise HTTPException(status_code=500, detail="Échec insertion base de données")
 
-    return {
-        "listing_id": listing_id,
-        "message": "Draft listing created successfully"
-    }
+    return {"listing_id": listing_id, "message": "Annonce créée avec succès"}
 
 
 # --------------------------------------------------
