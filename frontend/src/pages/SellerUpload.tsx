@@ -2,7 +2,12 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadImages } from '../api/client';
 
+const CATEGORIES = ['antique', 'art', 'bijoux', 'mobilier', 'arts décoratifs', 'livres', 'autres'];
+
 export function SellerUpload() {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('');
+  const [description, setDescription] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -40,7 +45,12 @@ export function SellerUpload() {
     setLoading(true);
     setError(null);
     try {
-      const { listing_id } = await uploadImages(files);
+      const { listing_id } = await uploadImages({
+        files,
+        title: title.trim() || undefined,
+        category: category.trim() || undefined,
+        description: description.trim() || undefined,
+      });
       navigate(`/listing/${listing_id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'upload");
@@ -51,11 +61,40 @@ export function SellerUpload() {
 
   return (
     <section className="upload-page">
-      <h1>Étape 1 — Photos du produit</h1>
+      <h1>Nouveau produit</h1>
       <p className="upload-desc">
-        Ajoutez une ou plusieurs photos (recto, verso, détails). Formats JPEG, PNG ou WEBP. Min. 1000×1000 px recommandé.
+        Remplissez les informations et ajoutez une ou plusieurs photos.
       </p>
       <form onSubmit={handleSubmit} className="upload-form">
+        <div className="form-fields">
+          <label>
+            <span>Titre</span>
+            <input
+              type="text"
+              placeholder="Ex. Vase en porcelaine ancienne"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          <label>
+            <span>Catégorie</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">— Choisir —</option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Description courte</span>
+            <textarea
+              placeholder="Décrivez brièvement l'objet..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+            />
+          </label>
+        </div>
         <label className="upload-zone">
           <input
             type="file"
@@ -66,7 +105,7 @@ export function SellerUpload() {
           <span className="upload-zone-text">
             {files.length > 0
               ? `${files.length} image(s) sélectionnée(s)`
-              : 'Cliquez ou glissez une ou plusieurs images ici'}
+              : 'Photos du produit — cliquez ou glissez une ou plusieurs images (JPEG, PNG, WEBP)'}
           </span>
         </label>
         {previews.length > 0 && (

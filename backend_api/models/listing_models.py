@@ -8,6 +8,7 @@ class ImageModel(BaseModel):
     original_name: str
     local_path: str
     mime_type: str
+    gridfs_file_id: Optional[str] = None  # ID MongoDB GridFS pour récupérer l'image
 
 
 class BlockchainModel(BaseModel):
@@ -24,6 +25,8 @@ class ListingCreate(BaseModel):
     created_at: datetime
     updated_at: datetime
     title: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
     starting_price: Optional[float] = None
     participants_count: int = 0
     end_time: Optional[datetime] = None
@@ -42,6 +45,8 @@ class ListingResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     title: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
     starting_price: Optional[float] = None
     participants_count: int = 0
     end_time: Optional[datetime] = None

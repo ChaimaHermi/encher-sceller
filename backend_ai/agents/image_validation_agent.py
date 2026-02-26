@@ -1,17 +1,16 @@
-from ..tools.reverse_image_search import ReverseImageSearcher
-from ..tools.ai_image_detector import AIImageDetector
-from ..tools.vision_analyzer import VisionAnalyzer
-from ..tools.ela_detector import ELADetector
-from ..tools.exif_analysis import ExifAnalyzer
-from ..tools.web_comparative_search import WebComparativeSearcher
-from ..tools.duplicate_check import DuplicateCheckerQdrant
+from ..tools.authenticityTool.reverse_image_search import ReverseImageSearcher
+from ..tools.authenticityTool.ai_image_detector import AIImageDetector
+from ..tools.authenticityTool.vision_analyzer import VisionAnalyzer
+from ..tools.authenticityTool.ela_detector import ELADetector
+from ..tools.authenticityTool.exif_analysis import ExifAnalyzer
+from ..tools.authenticityTool.web_comparative_search import WebComparativeSearcher
 from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class GeminiAutonomousAgent:
-    def __init__(self, gemini_api_key, serpapi_key, imgbb_api_key, serper_api_key=None, qdrant_url="http://localhost:6333", qdrant_api_key=None, openrouter_api_key=None):
+    def __init__(self, gemini_api_key, serpapi_key, imgbb_api_key, serper_api_key=None, openrouter_api_key=None):
         self.gemini_client = genai.Client(api_key=gemini_api_key)
         self.reverse_searcher = ReverseImageSearcher(serpapi_key=serpapi_key)
         self.ai_detector = AIImageDetector(model_type="umm-maybe")
@@ -20,24 +19,27 @@ class GeminiAutonomousAgent:
         self.ela_detector = ELADetector()
         self.exif_analyzer = ExifAnalyzer()
         self.comparative_searcher = WebComparativeSearcher(serper_api_key=serper_api_key)
-        self.duplicate_checker = DuplicateCheckerQdrant(url=qdrant_url, api_key=qdrant_api_key)
+
+    def _obj_to_dict(self, obj):
+        """Convert result objects to JSON-serializable dicts."""
+        from datetime import datetime, date
+        if obj is None:
+            return None
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: self._obj_to_dict(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [self._obj_to_dict(x) for x in obj]
+        if isinstance(obj, (str, int, float, bool)):
+            return obj
+        if hasattr(obj, "__dataclass_fields__"):
+            return {f: self._obj_to_dict(getattr(obj, f)) for f in obj.__dataclass_fields__}
+        if hasattr(obj, "__dict__"):
+            return {k: self._obj_to_dict(v) for k, v in vars(obj).items()}
+        return str(obj)
 
     def run(self, image_path, category=None, description=None):
-        # Step 0: Duplicate check against vector DB (Qdrant)
-        is_duplicate, duplicate_payload = self.duplicate_checker.check_duplicate(image_path)
-        if is_duplicate:
-            return {
-                "verdict": "duplicate",
-                "details": {
-                    "source": "vector_db",
-                    "matched_filename": duplicate_payload.get("filename") if duplicate_payload else None,
-                    "phash": duplicate_payload.get("phash") if duplicate_payload else None
-                }
-            }
-
-        # Image is not a duplicate, add it to the vector DB for future checks
-        self.duplicate_checker.add_to_db(image_path, metadata={"category": category, "description": description})
-
         # Step 1: ELA and EXIF analysis
         ela_result = self.ela_detector.analyze(image_path)
         exif_result = self.exif_analyzer.analyze(image_path)
@@ -45,70 +47,98 @@ class GeminiAutonomousAgent:
         # Step 2: Initial reverse image search (web presence check)
         reverse_result = self.reverse_searcher.analyze(image_path)
 
-        # Explain suspicion score calculation for reverse image search
-        suspicion_explanation = (
-            "Suspicion score is calculated based on the number of matches found online, "
-            "the presence of matches on suspicious domains (e.g., stock photo or e-commerce sites), "
-            "and whether the image appears in active product listings. "
-            "A higher score means the image is more likely to be stolen, fake, or duplicated."
-        )
+        # Rule-based override: si les signaux techniques sont bons, on procède sans demander à Gemini
+        # (évite les faux positifs quand ELA dit "clean" mais la note contient "suggests manipulation")
+        ela_verdict_ok = getattr(ela_result, 'verdict', '') in ("clean", "")
+        ela_score_low = ela_result.suspicion_score < 0.5
+        ela_very_low = ela_result.suspicion_score < 0.4  # Très rassurant → ignorer reverse
+        reverse_score_ok = getattr(reverse_result, 'suspicion_score', 1.0) < 0.8  # Seuil relevé (0.6→0.8)
 
-        prompt = f"""
+        if ela_verdict_ok and ela_very_low:
+            # ELA très rassurant → procéder même si reverse est élevé (produits courants = souvent trouvés en ligne)
+            pass
+        elif ela_verdict_ok and ela_score_low and reverse_score_ok:
+            # Signaux techniques OK → procéder directement à l'étape AI detection
+            pass
+        else:
+            # Sinon, demander à Gemini de décider
+            suspicion_explanation = (
+                "Suspicion score is calculated based on the number of matches found online, "
+                "the presence of matches on suspicious domains (e.g., stock photo or e-commerce sites), "
+                "and whether the image appears in active product listings."
+            )
+            prompt = f"""
 You are an autonomous agent for image validation on an auction platform.
 
-Step 1: Duplicate check: If the image matches a previously uploaded image or is found online with a high suspicion score, it is considered a duplicate and the process stops.
+=== ELA ANALYSIS (Error Level Analysis) ===
+VERDICT: {getattr(ela_result, 'verdict', 'unknown')}  ← This is the overall conclusion (clean/suspicious/likely_manipulated)
+Suspicion score: {ela_result.suspicion_score:.2f} (0=clean, 1=highly suspicious)
+Notes: {ela_result.notes}
+IMPORTANT: If verdict is "clean" AND suspicion_score < 0.5, the notes may mention "suggests manipulation" due to high contrast—this is often a FALSE POSITIVE for legitimate photos. Do NOT stop.
 
-Step 2: ELA and EXIF analysis:
-ELA result: {ela_result.notes} (Suspicion score: {ela_result.suspicion_score})
-EXIF: {exif_result.get('message')}
+=== EXIF METADATA ===
+{exif_result.get('message')}
+Has EXIF: {exif_result.get('has_exif', 'unknown')}
+NOTE: Missing EXIF is COMMON for screenshots, web images, converted formats—do NOT stop for this alone.
 
-Step 3: Reverse image search:
+=== REVERSE IMAGE SEARCH ===
 {reverse_result.notes}
-Found online: {reverse_result.found_online}, Suspicion score: {reverse_result.suspicion_score}
-How suspicion score is calculated: {suspicion_explanation}
+Found online: {reverse_result.found_online}
+Reverse suspicion score: {getattr(reverse_result, 'suspicion_score', 0):.2f}
+{suspicion_explanation}
 
-If duplicate is found and suspicion score is high, or ELA/EXIF indicate manipulation, stop and return a high suspicion verdict.
-Otherwise, proceed to AI detection.
+=== YOUR DECISION ===
+Reply with ONLY "stop" if: ELA verdict is "likely_manipulated" OR ELA suspicion >= 0.6 OR reverse suspicion >= 0.85.
+Finding product images online (PCs, electronics, common items) is EXPECTED—do NOT stop for reverse alone unless suspicion >= 0.85.
+Reply with "proceed" if: ELA verdict is "clean" with score < 0.5, OR signals are ambiguous. When in doubt, PROCEED to AI detection.
 """
-        gemini_decision = self.gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
-        if "stop" in gemini_decision.text.lower():
-            return {
-                "verdict": "duplicate_or_manipulated",
-                "details": {
-                    "ela": ela_result,
-                    "exif": exif_result,
-                    "reverse": reverse_result
+            gemini_decision = self.gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            gemini_text = (gemini_decision.text or "").lower() if hasattr(gemini_decision, 'text') and gemini_decision.text else ""
+            if "stop" in gemini_text and "proceed" not in gemini_text:
+                return {
+                    "verdict": "duplicate_or_manipulated",
+                    "details": {
+                        "ela": self._obj_to_dict(ela_result),
+                        "exif": self._obj_to_dict(exif_result),
+                        "reverse": self._obj_to_dict(reverse_result)
+                    }
                 }
-            }
 
         # Step 4: AI detection
         ai_result = self.ai_detector.analyze(image_path)
         sdxl_result = self.sdxl_detector.analyze(image_path)
-        ai_prompt = f"""
-Step 4: AI detection results:
-umm-maybe: {ai_result.notes}, suspicion score: {ai_result.suspicion_score}
-sdxl: {sdxl_result.notes}, suspicion score: {sdxl_result.suspicion_score}
-Note: The SDXL model is generally more reliable for photographic and general images, while umm-maybe is best for artistic/creative images. Prioritize SDXL's result for most cases.
-If SDXL suspicion score is high, stop and return verdict.
-Otherwise, proceed to category/description reasoning.
+
+        # Règle: si les deux modèles AI ont un score bas, on procède sans demander à Gemini
+        ai_scores_low = ai_result.suspicion_score < 0.7 and sdxl_result.suspicion_score < 0.7
+        if ai_scores_low:
+            pass  # Procéder à Vision + raisonnement authenticité
+        else:
+            ai_prompt = f"""
+Step 4: AI detection results (detects if image is AI-generated):
+umm-maybe: {ai_result.notes}, suspicion score: {ai_result.suspicion_score:.2f}
+sdxl: {sdxl_result.notes}, suspicion score: {sdxl_result.suspicion_score:.2f}
+Note: SDXL is more reliable for photos; umm-maybe for artistic images.
+Reply "stop" ONLY if BOTH models have suspicion_score >= 0.7 (clearly AI-generated).
+Reply "proceed" if scores are low (< 0.6) or ambiguous—real objects (antiques, arts décoratifs) often score mid-range. When in doubt, PROCEED.
 """
-        gemini_decision = self.gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=ai_prompt
-        )
-        if "stop" in gemini_decision.text.lower():
-            return {
-                "verdict": "ai_generated",
-                "details": {
-                    "ela": ela_result,
-                    "exif": exif_result,
-                    "reverse": reverse_result,
-                    "ai": {"umm-maybe": ai_result, "sdxl": sdxl_result}
+            gemini_decision = self.gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=ai_prompt
+            )
+            gemini_text = (gemini_decision.text or "").lower() if hasattr(gemini_decision, 'text') and gemini_decision.text else ""
+            if "stop" in gemini_text and "proceed" not in gemini_text:
+                return {
+                    "verdict": "ai_generated",
+                    "details": {
+                        "ela": self._obj_to_dict(ela_result),
+                        "exif": self._obj_to_dict(exif_result),
+                        "reverse": self._obj_to_dict(reverse_result),
+                        "ai": {"umm-maybe": self._obj_to_dict(ai_result), "sdxl": self._obj_to_dict(sdxl_result)}
+                    }
                 }
-            }
 
         # Step 5: Vision analysis - detailed visual inspection
         vision_result = self.vision_analyzer.analyze(image_path)
@@ -132,8 +162,8 @@ Otherwise, proceed to category/description reasoning.
 
         # Step 7: Authenticity Reasoning - LLM reasons on item authenticity using vision + comparative results
         authenticity_prompt = f"""
-You are an expert art and collectibles authenticator. The image has passed uniqueness verification (not a duplicate).
-Now analyze the AUTHENTICITY of the item using the following evidence:
+You are an expert art and collectibles authenticator.
+Analyze the AUTHENTICITY of the item using the following evidence:
 
 === VISION ANALYSIS (AI Visual Inspection) ===
 {vision_result.full_report if vision_result else 'No vision analysis available'}
@@ -225,8 +255,6 @@ if __name__ == "__main__":
     serpapi_key = os.getenv("SERPAPI_KEY")
     imgbb_api_key = os.getenv("IMGBB_API_KEY")
     serper_api_key = os.getenv("SERPER_API_KEY")
-    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    qdrant_api_key = os.getenv("QDRANT_API_KEY")
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
     if len(sys.argv) < 2:
@@ -242,8 +270,6 @@ if __name__ == "__main__":
         serpapi_key=serpapi_key,
         imgbb_api_key=imgbb_api_key,
         serper_api_key=serper_api_key,
-        qdrant_url=qdrant_url,
-        qdrant_api_key=qdrant_api_key,
         openrouter_api_key=openrouter_api_key
     )
 
@@ -253,11 +279,7 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Verdict: {result.get('verdict', 'N/A').upper()}")
     
-    if result.get('verdict') == 'duplicate':
-        print(f"\nDuplicate detected!")
-        print(f"  Matched file: {result['details'].get('matched_filename')}")
-        print(f"  pHash: {result['details'].get('phash')}")
-    elif result.get('verdict') == 'validated':
+    if result.get('verdict') == 'validated':
         print("\n--- Authenticity Reasoning ---")
         print(result.get('authenticity_reasoning', 'No reasoning available'))
         print("\n--- Tool Results Summary ---")

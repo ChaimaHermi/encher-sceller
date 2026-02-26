@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { PipelineStepper } from '../components/PipelineStepper';
 import { getListingImages } from '../utils/listing';
 import { API_BASE } from '../config';
+import { AnalysisOutput } from '../components/AnalysisOutput';
+import { PriceEstimationDisplay } from '../components/PriceEstimationDisplay';
 
 interface Listing {
   listing_id: string;
@@ -12,6 +14,8 @@ interface Listing {
   images?: { filename: string; original_name: string }[];
   image?: { filename: string; original_name: string };
   title?: string;
+  category?: string;
+  description?: string;
   starting_price?: number;
   participants_count?: number;
   end_time?: string;
@@ -138,6 +142,12 @@ export function ListingDetail() {
           )}
         </div>
         <div className="listing-info">
+          {listing.category && (
+            <p><strong>Catégorie :</strong> {listing.category}</p>
+          )}
+          {listing.description && (
+            <p><strong>Description :</strong> {listing.description}</p>
+          )}
           <p><strong>Statut :</strong> {listing.status}</p>
           {isSeller && listing.pipeline_phase != null && (
             <p><strong>Phase :</strong> {listing.pipeline_phase} / 6</p>
@@ -177,18 +187,25 @@ export function ListingDetail() {
             </div>
           )}
 
-          {/* Vendeur : infos pipeline + boutons */}
+          {/* Vendeur : résultat analyse authenticité */}
           {isSeller && listing.ai_analysis && (
-            <details>
-              <summary>Analyse IA (authenticité)</summary>
-              <pre>{JSON.stringify(listing.ai_analysis, null, 2)}</pre>
-            </details>
+            <div className="ai-analysis-result">
+              <h3>Résultat vérification authenticité</h3>
+              <div className="ai-analysis-scroll">
+                <AnalysisOutput data={listing.ai_analysis} />
+              </div>
+            </div>
           )}
           {isSeller && listing.price_estimation && (
-            <details>
-              <summary>Estimation prix</summary>
-              <pre>{JSON.stringify(listing.price_estimation, null, 2)}</pre>
-            </details>
+            <div className="price-estimation-section">
+              <h3>Estimation prix</h3>
+              <PriceEstimationDisplay
+                data={{
+                  ...listing.price_estimation,
+                  starting_price: listing.starting_price ?? (listing.price_estimation as Record<string, unknown>).median,
+                }}
+              />
+            </div>
           )}
           {isSeller && canAdvance && (
             <button

@@ -42,6 +42,14 @@ class ComparativeSearchResult:
     notes: str
     sources_checked: list[str]
 
+    @property
+    def match_count(self) -> int:
+        return len(self.museum_matches) + len(self.auction_comparables) + len(self.publications)
+
+    @property
+    def suspicious_sources(self) -> list[dict]:
+        return self.stolen_art_flags
+
 
 class WebComparativeSearcher:
     """
@@ -319,6 +327,14 @@ class WebComparativeSearcher:
         return round(score, 4), verdict, " | ".join(notes) or "No issues detected."
 
     # ── public API ────────────────────────────────────────────────────────────
+
+    def search(self, query: str) -> ComparativeSearchResult:
+        """
+        Search using a single query string (e.g. category + description).
+        Delegates to analyze() with the query as object_type.
+        """
+        q = query.strip() or "artwork"
+        return self.analyze(object_type=q, period="", category=q)
 
     def analyze(
         self,
